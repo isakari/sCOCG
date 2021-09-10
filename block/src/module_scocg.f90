@@ -15,6 +15,7 @@ module module_scocg
      integer,allocatable :: im(:), jm(:) !< pointers for M matrix
      real(8),allocatable :: kmat(:) !< K matrix
      real(8),allocatable :: mmat(:) !< M matrix
+     real(8),allocatable :: fmmat(:) !< M^-1 matrix
      complex(8),allocatable :: amat(:) !< coefficient matrix (for validation)
      complex(8),allocatable :: shfts(:) !< shfts(j): j-th shift
      complex(8),allocatable :: xvec(:,:,:) !< xvec(:,i): i-th/nrhs and j-th/nshfts sol .
@@ -30,6 +31,7 @@ module module_scocg
   integer,pointer :: im(:), jm(:) !< pointers for M matrix
   real(8),pointer :: kmat(:) !< K matrix
   real(8),pointer :: mmat(:) !< M matrix
+  real(8),pointer :: fmmat(:) !< M^-1 matrix
   complex(8),pointer :: shfts(:) !< shfts(j): j-th shift
   complex(8),pointer :: xvec(:,:,:) !< xvec(:,i,j): i-th/nrhs and j-th/nshfts sol .
   complex(8),pointer :: bvec(:,:) !< bvec(:,i): i-th right-hand side
@@ -171,6 +173,7 @@ contains
     allocate(ls_%im(ndof+1)); im=>ls_%im
     allocate(ls_%jm(nnzm)); jm=>ls_%jm
     allocate(ls_%mmat(nnzm)); mmat=>ls_%mmat
+    allocate(ls_%fmmat(nnzm)); fmmat=>ls_%fmmat
     do i=1,nnzm
        read(1,*) ix, iy, tmp
        iia(i)=ix+1
@@ -192,6 +195,8 @@ contains
     do i=1,ndof
        call quicksort2(jm,mmat,im(i),im(i+1)-1)
     end do
+    fmmat=mmat
+
     
     deallocate(iia)
 
@@ -205,7 +210,7 @@ contains
     ! right-hand sides
     nrhs=20
     allocate(ls_%bvec(ndof,nrhs)); bvec=>ls_%bvec
-    allocate(ls_%xvec(ndof,nrhs,nshfts)); xvec=>ls_%xvec
+    allocate(ls_%xvec(ndof,nshfts,nrhs)); xvec=>ls_%xvec
 
     call gen_random_numbers_complex(ndof*nrhs,bvec)
     
@@ -216,8 +221,8 @@ contains
     type(LinearSystems),intent(inout),target :: ls_
 
     nullify(ndof,nnzk,nnzm,nshfts,nrhs)
-    deallocate(ls_%ik,ls_%jk,ls_%kmat,ls_%im,ls_%jm,ls_%mmat,ls_%shfts)
-    nullify(ik,jk,im,jk,kmat,mmat,shfts)
+    deallocate(ls_%ik,ls_%jk,ls_%kmat,ls_%im,ls_%jm,ls_%mmat,ls_%fmmat,ls_%shfts)
+    nullify(ik,jk,im,jk,kmat,mmat,fmmat,shfts)
     deallocate(ls_%bvec,ls_%xvec)
     nullify(bvec,xvec)
     
@@ -227,10 +232,9 @@ contains
     integer :: i, j
 
     integer :: k, icnt, info, ipiv(ndof)
-    complex(8),allocatable :: am(:,:), bm(:,:)
-    complex(8) :: bb(ndof)
+    complex(8),allocatable :: am(:,:)
     
-    allocate(am(ndof,ndof),bm(ndof,ndof))
+    allocate(am(ndof,ndof))
 
     do i=1,nshfts
        am(:,:)=zero
@@ -248,70 +252,26 @@ contains
              icnt=icnt+1
           end do
        end do
-       xvec(:,:,i)=bvec
-       call zgesv(ndof,nrhs,am,ndof,ipiv,xvec(:,:,i),ndof,info)
+       xvec(:,i,:)=bvec
+       call zgesv(ndof,nrhs,am,ndof,ipiv,xvec(:,i,:),ndof,info)
        do j=1,ndof
-          write(9+i,*) real(xvec(j,3,i)), aimag(xvec(j,3,i))
+          write(9+i,*) real(xvec(j,i,3)), aimag(xvec(j,i,3))
        end do
     end do
-
-    !!!!!!
-    am(:,:)=zero
-    icnt=1
-    do j=1,ndof
-       do k=im(j),im(j+1)-1
-          am(j,jm(icnt))=mmat(icnt)
-          icnt=icnt+1
-       end do
-    end do
-    bb(:)=bvec(:,3)
-    call zgesv(ndof,1,am,ndof,ipiv,bb,ndof,info)
-    do i=1,ndof
-       write(44,*) i,real(bb(i)),aimag(bb(i))
-    end do
-
-!!!!!!
-    am(:,:)=zero
-    icnt=1
-    do j=1,ndof
-       do k=im(j),im(j+1)-1
-          am(j,jm(icnt))=mmat(icnt)
-          icnt=icnt+1
-       end do
-    end do
-    bm(:,:)=zero
-    icnt=1
-    do j=1,ndof
-       do k=ik(j),ik(j+1)-1
-          bm(j,jk(icnt))=kmat(icnt)
-          icnt=icnt+1
-       end do
-    end do
-    call zgesv(ndof,ndof,am,ndof,ipiv,bm,ndof,info)
-    write(*,*) info
-    do i=1,ndof
-       bm(i,i)=bm(i,i)-shfts(1)
-       !bm=m^-1.k-zI
-    end do
-    call zgesv(ndof,1,bm,ndof,ipiv,bb,ndof,info)
-    write(*,*) info
-    do j=1,ndof
-       write(20,*) real(bb(j)), aimag(bb(j))
-    end do
-
-    
-    deallocate(am,bm)
+    deallocate(am)
     
   end subroutine lapack_complex
+
 
   !> the main
   subroutine scocg
     integer :: irhs, ishf, ist, i, j, k, icnt
-    real(8) :: trvec(ndof), tivec(ndof), qrvec(ndof), qivec(ndof)
-    complex(8) :: pvec(ndof,nshfts), rvec(ndof), tvec(ndof), qvec(ndof) !!!!!!!!!!!!!!!!
-    complex(8) :: alp(2,nshfts), bet(2,nshfts), c(5,nshfts) !!!!!!!!!!!!
+    real(8) :: tvecr(ndof,2*nrhs), qvecr(ndof,2*nrhs)
+    complex(8) :: pvec(ndof,nshfts,nrhs), rvec(ndof,nrhs), tvec(ndof,nrhs), qvec(ndof,nrhs)
+    complex(8) :: alp(2,nshfts,nrhs), bet(2,nshfts,nrhs), c(3,nshfts,nrhs) !!!!!!!!!!!!
 
-    complex(8) :: bunbo, bunsi, sig
+    complex(8) :: bunbo(nrhs), bunsi(nrhs), sig
+    logical :: chk
 
     integer :: itgv(ndof)
 
@@ -323,7 +283,7 @@ contains
           icnt=icnt+1
        end do
     end do
-    
+
     ! precon. invert M
     maxfct = 1 
     mnum = 1
@@ -348,110 +308,149 @@ contains
 
     pt(:)=0
 
+    ! factorise M
     phase=12 ! Analysis, numerical factorization
-    call pardiso (pt, maxfct, mnum, mtype, phase, ndof, mmat, im, jm, &
+    call pardiso (pt, maxfct, mnum, mtype, phase, ndof, fmmat, im, jm, &
          idum, 1, iparm, msglvl, ddum, ddum, error)
     if (error /= 0) then
        write(*,*) 'The following ERROR was detected: ', error
        stop 
     end if
 
-    do irhs=3,3 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-       rvec(:)=bvec(:,irhs)*itgv(:)
-       do ishf=1,nshfts
-          pvec(:,ishf)=rvec(:)
-          xvec(:,irhs,ishf)=zero
-       end do
-       c(1:3,:)=one
-       alp(:,:)=one
-       bet(:,:)=zero
+    ! q=M^-1.b
+    do irhs=1,nrhs
+       tvecr(:,2*irhs-1)= real(bvec(:,irhs))
+       tvecr(:,2*irhs  )=aimag(bvec(:,irhs))
+    end do
+    qvecr(:,:)=zero
+    phase=33
+    call pardiso (pt, maxfct, mnum, mtype, phase, ndof, fmmat, im, jm, &
+         idum, 2*nrhs, iparm, msglvl, tvecr, qvecr, error)
+    if (error /= 0) then
+       write(*,*) 'the following error was detected (doko): ', error
+       stop
+    endif
+    do irhs=1,nrhs
+       qvec(:,irhs)=cmplx(qvecr(:,2*irhs-1),qvecr(:,2*irhs),kind(1.d0))*itgv(:)
+    end do
+    
+    ! initialise
+    do irhs=1,nrhs
+       rvec(:,irhs)=bvec(:,irhs)*itgv(:)
+    end do
+    do ishf=1,nshfts
+       pvec(:,ishf,:)=qvec(:,:)
+       xvec(:,ishf,:)=zero
+    end do
 
-       ! CG loop
-       do ist=1,ndof
+    c(:,:,:)=one
+    alp(:,:,:)=one
+    bet(:,:,:)=zero
 
-          write(*,*) ist
-
-          ! bunsi=r^t.r
-          bunsi=zero
-          do j=1,ndof
-             bunsi=bunsi+rvec(j)*rvec(j)
-          end do
-
-          ! t=Kp
-          tvec(:)=zero
-          icnt=1
-          do i=1,ndof
-             do k=ik(i),ik(i+1)-1
-                tvec(i)=tvec(i)+kmat(icnt)*pvec(jk(icnt),1)
-                icnt=icnt+1
-             end do
-          end do
-
-          ! q=M^-1.Kp
-          trvec(:)=real(tvec(:))
-          tivec(:)=aimag(tvec(:))
-          qrvec=zero
-          qivec=zero
-          phase=33
-          call pardiso (pt, maxfct, mnum, mtype, phase, ndof, mmat, im, jm, &
-               idum, 1, iparm, msglvl, trvec, qrvec, error)
-          if (error /= 0) then
-             write(*,*) 'the following error was detected (doko): ', error
-             stop
-          endif
-          call pardiso (pt, maxfct, mnum, mtype, phase, ndof, mmat, im, jm, &
-               idum, 1, iparm, msglvl, tivec, qivec, error)
-          if (error /= 0) then
-             write(*,*) 'the following error was detected (koko): ', error
-             stop
-          endif
-          qvec=cmplx(qrvec,qivec,kind(1.d0))
-
-          qvec(:)=qvec(:)-shfts(1)*pvec(:,1)
-          
-          ! bunbo=p^t.(M^-1.K)p
-          bunbo=zero
-          do j=1,ndof
-             bunbo=bunbo+pvec(j,1)*qvec(j)
-          end do
-
-          ! update alpha
-          alp(2,1)=alp(1,1) ! keep the previous one
-          alp(1,1)=bunsi/bunbo ! and update
-          xvec(:,irhs,1)=xvec(:,irhs,1)+alp(1,1)*pvec(:,1)
-          
-          ! update rvec
-          rvec(:)=rvec(:)-alp(1,1)*qvec(:)
-          rvec(:)=rvec(:)*itgv(:)
-          
-          ! update beta
-          bunbo=bunsi !beta's bunbo = alpha's bunsi
-          bunsi=zero
-          do j=1,ndof
-             bunsi=bunsi+rvec(j)*rvec(j)
-          end do
-          bet(2,1)=bet(1,1)
-          bet(1,1)=bunsi/bunbo
-
-          pvec(:,1)=rvec(:)+bet(1,1)*pvec(:,1)
-
-          do ishf=2,nshfts
-             sig=shfts(1)-shfts(ishf)
-             c(3,ishf)=c(2,ishf)
-             c(2,ishf)=c(1,ishf)
-             c(1,ishf)=(1.d0+alp(1,1)*sig)*c(2,ishf)+(c(2,ishf)-c(3,ishf))*bet(2,1)*alp(1,1)/alp(2,1)
-             alp(1,ishf)=c(2,ishf)/c(1,ishf)*alp(1,1)
-             xvec(:,irhs,ishf)=xvec(:,irhs,ishf)+alp(1,ishf)*pvec(:,ishf)
-             bet(1,ishf)=(c(2,ishf)/c(1,ishf))**2*bet(1,1)
-             pvec(:,ishf)=rvec(:)/c(1,ishf)+bet(1,ishf)*pvec(:,ishf)
-          end do
-          if(real(dot_product(rvec,rvec)).le.real(dot_product(bvec(:,irhs),bvec(:,irhs)))*1.d-32) exit
+    ! CG loop
+    do ist=1,ndof
+       
+       ! bunsi=r^t.M^-1r=r^t.q
+       bunsi(:)=zero
+       do j=1,ndof
+          bunsi(:)=bunsi(:)+rvec(j,:)*qvec(j,:)
        end do
 
-       do i=1,nshfts
-          do j=1,ndof
-             write(29+i,*) real(xvec(j,3,i)), aimag(xvec(j,3,i))
+       ! t=(K-z0.M)p
+       tvec(:,:)=zero
+       icnt=1
+       do i=1,ndof
+          do k=ik(i),ik(i+1)-1
+             tvec(i,:)=tvec(i,:)+kmat(icnt)*pvec(jk(icnt),1,:)
+             icnt=icnt+1
           end do
+       end do
+       icnt=1
+       do i=1,ndof
+          do k=im(i),im(i+1)-1
+             tvec(i,:)=tvec(i,:)-shfts(1)*mmat(icnt)*pvec(jm(icnt),1,:)
+             icnt=icnt+1
+          end do
+       end do
+       
+       ! bunbo=p^t.(M^-1.K)p
+       bunbo(:)=zero
+       do j=1,ndof
+          bunbo(:)=bunbo(:)+pvec(j,1,:)*tvec(j,:)
+          !write(101,*) pvec(j,1)
+       end do
+
+       ! update alpha
+       alp(2,1,:)=alp(1,1,:) ! keep the previous one
+       alp(1,1,:)=bunsi(:)/bunbo(:) ! and update
+       do irhs=1,nrhs
+          xvec(:,1,irhs)=xvec(:,1,irhs)+alp(1,1,irhs)*pvec(:,1,irhs)
+       end do
+
+       ! update rvec
+       do irhs=1,nrhs
+          rvec(:,irhs)=rvec(:,irhs)-alp(1,1,irhs)*tvec(:,irhs)
+          rvec(:,irhs)=rvec(:,irhs)*itgv(:)
+       end do
+
+       ! update beta
+       bunbo(:)=bunsi(:) !beta's bunbo = alpha's bunsi
+
+       ! q=M^-1.r
+       do irhs=1,nrhs
+          tvecr(:,2*irhs-1)= real(rvec(:,irhs))
+          tvecr(:,2*irhs  )=aimag(rvec(:,irhs))
+       end do
+       qvecr(:,:)=zero
+       phase=33
+       call pardiso (pt, maxfct, mnum, mtype, phase, ndof, fmmat, im, jm, &
+            idum, 2*nrhs, iparm, msglvl, tvecr, qvecr, error)
+       if (error /= 0) then
+          write(*,*) 'the following error was detected (doko): ', error
+          stop
+       endif
+       do irhs=1,nrhs
+          qvec(:,irhs)=cmplx(qvecr(:,2*irhs-1),qvecr(:,2*irhs),kind(1.d0))*itgv(:)
+       end do
+       
+       ! bunsi=r^t(M^-1.r)=r^t q
+       bunsi(:)=zero
+       do j=1,ndof
+          bunsi(:)=bunsi(:)+rvec(j,:)*qvec(j,:)
+       end do
+       bet(2,1,:)=bet(1,1,:)
+       bet(1,1,:)=bunsi(:)/bunbo(:)
+       
+       do irhs=1,nrhs
+          pvec(:,1,irhs)=qvec(:,irhs)+bet(1,1,irhs)*pvec(:,1,irhs)
+       end do
+
+       do ishf=2,nshfts
+          sig=shfts(1)-shfts(ishf)
+          c(3,ishf,:)=c(2,ishf,:)
+          c(2,ishf,:)=c(1,ishf,:)
+          c(1,ishf,:)=(1.d0+alp(1,1,:)*sig)*c(2,ishf,:)&
+               +(c(2,ishf,:)-c(3,ishf,:))*bet(2,1,:)*alp(1,1,:)/alp(2,1,:)
+          alp(1,ishf,:)=c(2,ishf,:)/c(1,ishf,:)*alp(1,1,:)
+          bet(1,ishf,:)=(c(2,ishf,:)/c(1,ishf,:))**2*bet(1,1,:)
+          do irhs=1,nrhs
+             xvec(:,ishf,irhs)=xvec(:,ishf,irhs)+alp(1,ishf,irhs)*pvec(:,ishf,irhs)
+             pvec(:,ishf,irhs)=qvec(:,irhs)/c(1,ishf,irhs)+bet(1,ishf,irhs)*pvec(:,ishf,irhs)
+          end do
+       end do
+       chk=.true.
+       do irhs=1,nrhs
+          chk=chk&
+               .and.(real(dot_product(rvec(:,irhs),rvec(:,irhs)))&
+               .le.real(dot_product(bvec(:,irhs),bvec(:,irhs)))*1.d-16)
+       end do
+       write(*,*) ist
+       if(chk) exit
+    end do
+
+    do i=1,nshfts
+       do j=1,ndof
+          write(29+i,*) real(xvec(j,i,3)), aimag(xvec(j,i,3))
        end do
     end do
     

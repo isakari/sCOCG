@@ -196,7 +196,6 @@ contains
        call quicksort2(jm,mmat,im(i),im(i+1)-1)
     end do
     fmmat=mmat
-
     
     deallocate(iia)
 
@@ -232,10 +231,9 @@ contains
     integer :: i, j
 
     integer :: k, icnt, info, ipiv(ndof)
-    complex(8),allocatable :: am(:,:), bm(:,:)
-    complex(8) :: bb(ndof)
+    complex(8),allocatable :: am(:,:)
     
-    allocate(am(ndof,ndof),bm(ndof,ndof))
+    allocate(am(ndof,ndof))
 
     do i=1,nshfts
        am(:,:)=zero
@@ -260,52 +258,8 @@ contains
        end do
     end do
 
-    !!!!!!
-    am(:,:)=zero
-    icnt=1
-    do j=1,ndof
-       do k=im(j),im(j+1)-1
-          am(j,jm(icnt))=mmat(icnt)
-          icnt=icnt+1
-       end do
-    end do
-    bb(:)=bvec(:,3)
-    call zgesv(ndof,1,am,ndof,ipiv,bb,ndof,info)
-    do i=1,ndof
-       write(44,*) i,real(bb(i)),aimag(bb(i))
-    end do
-
-!!!!!!
-    am(:,:)=zero
-    icnt=1
-    do j=1,ndof
-       do k=im(j),im(j+1)-1
-          am(j,jm(icnt))=mmat(icnt)
-          icnt=icnt+1
-       end do
-    end do
-    bm(:,:)=zero
-    icnt=1
-    do j=1,ndof
-       do k=ik(j),ik(j+1)-1
-          bm(j,jk(icnt))=kmat(icnt)
-          icnt=icnt+1
-       end do
-    end do
-    call zgesv(ndof,ndof,am,ndof,ipiv,bm,ndof,info)
-    write(*,*) info
-    do i=1,ndof
-       bm(i,i)=bm(i,i)-shfts(1)
-       !bm=m^-1.k-zI
-    end do
-    call zgesv(ndof,1,bm,ndof,ipiv,bb,ndof,info)
-    write(*,*) info
-    do j=1,ndof
-       write(20,*) real(bb(j)), aimag(bb(j))
-    end do
-
     
-    deallocate(am,bm)
+    deallocate(am)
     
   end subroutine lapack_complex
 

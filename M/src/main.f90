@@ -7,7 +7,7 @@ program main
 
   character(len=32) :: fk, fm, fs
   fk="k10wp.txt"
-  fm="m10wp.txt"
+  fm="i10.txt"
   fs="shifts.txt"  
   
   !k(m).txt contains the non-zero components of the matrix K(M) in the COO format

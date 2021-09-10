@@ -20,7 +20,8 @@ contains
     deallocate(seed)
     do i=1,n
        !rand(i)=cmplx(ransu(2*i-1),ransu(2*i),kind(1.d0))
-       rand(i)=1.d0
+       !rand(i)=1.d0
+       rand(i)=dble(i)
     end do
     
   end subroutine gen_random_numbers_complex
