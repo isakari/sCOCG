@@ -1,0 +1,6 @@
+old/
+a.out
+*.o
+*~
+fort*
+*mod

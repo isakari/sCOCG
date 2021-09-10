@@ -15,6 +15,7 @@ module module_scocg
      integer,allocatable :: im(:), jm(:) !< pointers for M matrix
      real(8),allocatable :: kmat(:) !< K matrix
      real(8),allocatable :: mmat(:) !< M matrix
+     real(8),allocatable :: fmmat(:) !< M^-1 matrix
      complex(8),allocatable :: amat(:) !< coefficient matrix (for validation)
      complex(8),allocatable :: shfts(:) !< shfts(j): j-th shift
      complex(8),allocatable :: xvec(:,:,:) !< xvec(:,i): i-th/nrhs and j-th/nshfts sol .
@@ -30,6 +31,7 @@ module module_scocg
   integer,pointer :: im(:), jm(:) !< pointers for M matrix
   real(8),pointer :: kmat(:) !< K matrix
   real(8),pointer :: mmat(:) !< M matrix
+  real(8),pointer :: fmmat(:) !< M^-1 matrix
   complex(8),pointer :: shfts(:) !< shfts(j): j-th shift
   complex(8),pointer :: xvec(:,:,:) !< xvec(:,i,j): i-th/nrhs and j-th/nshfts sol .
   complex(8),pointer :: bvec(:,:) !< bvec(:,i): i-th right-hand side
@@ -171,6 +173,7 @@ contains
     allocate(ls_%im(ndof+1)); im=>ls_%im
     allocate(ls_%jm(nnzm)); jm=>ls_%jm
     allocate(ls_%mmat(nnzm)); mmat=>ls_%mmat
+    allocate(ls_%fmmat(nnzm)); fmmat=>ls_%fmmat
     do i=1,nnzm
        read(1,*) ix, iy, tmp
        iia(i)=ix+1
@@ -192,6 +195,8 @@ contains
     do i=1,ndof
        call quicksort2(jm,mmat,im(i),im(i+1)-1)
     end do
+    fmmat=mmat
+
     
     deallocate(iia)
 
@@ -216,8 +221,8 @@ contains
     type(LinearSystems),intent(inout),target :: ls_
 
     nullify(ndof,nnzk,nnzm,nshfts,nrhs)
-    deallocate(ls_%ik,ls_%jk,ls_%kmat,ls_%im,ls_%jm,ls_%mmat,ls_%shfts)
-    nullify(ik,jk,im,jk,kmat,mmat,shfts)
+    deallocate(ls_%ik,ls_%jk,ls_%kmat,ls_%im,ls_%jm,ls_%mmat,ls_%fmmat,ls_%shfts)
+    nullify(ik,jk,im,jk,kmat,mmat,fmmat,shfts)
     deallocate(ls_%bvec,ls_%xvec)
     nullify(bvec,xvec)
     
@@ -338,7 +343,7 @@ contains
     pt(:)=0
 
     phase=12 ! Analysis, numerical factorization
-    call pardiso (pt, maxfct, mnum, mtype, phase, ndof, mmat, im, jm, &
+    call pardiso (pt, maxfct, mnum, mtype, phase, ndof, fmmat, im, jm, &
          idum, 1, iparm, msglvl, ddum, ddum, error)
     if (error /= 0) then
        write(*,*) 'The following ERROR was detected: ', error
@@ -346,48 +351,59 @@ contains
     end if
 
     do irhs=3,3 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-       ! q=M^-1.v
-!!$       trvec(:)=real(bvec(:,irhs))
-!!$       tivec(:)=aimag(bvec(:,irhs))
-!!$
-!!$       phase=33 ! solve
-!!$       call pardiso (pt, maxfct, mnum, mtype, phase, ndof, mmat, im, jm, &
-!!$            idum, 1, iparm, msglvl, trvec, qrvec, error)
-!!$       if (error /= 0) then
-!!$          write(*,*) 'the following error was detected (doko): ', error
-!!$          stop
-!!$       endif
-!!$       call pardiso (pt, maxfct, mnum, mtype, phase, ndof, mmat, im, jm, &
-!!$            idum, 1, iparm, msglvl, tivec, qivec, error)
-!!$       if (error /= 0) then
-!!$          write(*,*) 'the following error was detected (koko): ', error
-!!$          stop
-!!$       endif
-!!$
-!!$       ! initialise
-!!$       bvec(:,irhs)=cmplx(qrvec,qivec,kind(1.d0))
-!!$       do i=1,ndof !!!
-!!$          write(45,*) i,real(bvec(i,irhs)),aimag(bvec(i,irhs))
-!!$       end do
+       trvec(:)=real(bvec(:,irhs))
+       tivec(:)=aimag(bvec(:,irhs))
+       qrvec=zero
+       qivec=zero
+       phase=33
+       call pardiso (pt, maxfct, mnum, mtype, phase, ndof, fmmat, im, jm, &
+            idum, 1, iparm, msglvl, trvec, qrvec, error)
+       if (error /= 0) then
+          write(*,*) 'the following error was detected (doko): ', error
+          stop
+       endif
+       call pardiso (pt, maxfct, mnum, mtype, phase, ndof, fmmat, im, jm, &
+            idum, 1, iparm, msglvl, tivec, qivec, error)
+       if (error /= 0) then
+          write(*,*) 'the following error was detected (koko): ', error
+          stop
+       endif
+       qvec=cmplx(qrvec,qivec,kind(1.d0))
        rvec(:)=bvec(:,irhs)
        do ishf=1,nshfts
-          pvec(:,ishf)=rvec(:)
+          pvec(:,ishf)=qvec(:)
           xvec(:,irhs,ishf)=zero
        end do
        c(1:3,:)=one
-       !!!!!!c(4:5,:)=one
        alp(:,:)=one
        bet(:,:)=zero
 
        ! CG loop
        do ist=1,ndof
 
-          write(*,*) ist
-
-          ! bunsi=r^t.r
+          ! bunsi=r^t.M^-1r
+          trvec(:)=real(rvec(:))
+          tivec(:)=aimag(rvec(:))
+          qrvec=zero
+          qivec=zero
+          phase=33
+          call pardiso (pt, maxfct, mnum, mtype, phase, ndof, fmmat, im, jm, &
+               idum, 1, iparm, msglvl, trvec, qrvec, error)
+          if (error /= 0) then
+             write(*,*) 'the following error was detected (doko): ', error
+             stop
+          endif
+          call pardiso (pt, maxfct, mnum, mtype, phase, ndof, fmmat, im, jm, &
+               idum, 1, iparm, msglvl, tivec, qivec, error)
+          if (error /= 0) then
+             write(*,*) 'the following error was detected (koko): ', error
+             stop
+          endif
+          qvec=cmplx(qrvec,qivec,kind(1.d0))
+          
           bunsi=zero
           do j=1,ndof
-             bunsi=bunsi+rvec(j)*rvec(j)
+             bunsi=bunsi+rvec(j)*qvec(j)
           end do
 
           ! t=Kp
@@ -399,54 +415,62 @@ contains
                 icnt=icnt+1
              end do
           end do
+          icnt=1
+          do i=1,ndof
+             do k=im(i),im(i+1)-1
+                tvec(i)=tvec(i)-shfts(1)*mmat(icnt)*pvec(jm(icnt),1)
+                icnt=icnt+1
+             end do
+          end do
 
-          ! q=M^-1.Kp
-          trvec(:)=real(tvec(:))
-          tivec(:)=aimag(tvec(:))
-          qrvec=zero
-          qivec=zero
-          phase=33
-          call pardiso (pt, maxfct, mnum, mtype, phase, ndof, mmat, im, jm, &
-               idum, 1, iparm, msglvl, trvec, qrvec, error)
-          if (error /= 0) then
-             write(*,*) 'the following error was detected (doko): ', error
-             stop
-          endif
-          call pardiso (pt, maxfct, mnum, mtype, phase, ndof, mmat, im, jm, &
-               idum, 1, iparm, msglvl, tivec, qivec, error)
-          if (error /= 0) then
-             write(*,*) 'the following error was detected (koko): ', error
-             stop
-          endif
-          qvec=cmplx(qrvec,qivec,kind(1.d0))
-
-          qvec(:)=qvec(:)-shfts(1)*pvec(:,1)
+          !qvec(:)=tvec(:)-shfts(1)*pvec(:,1)
           
           ! bunbo=p^t.(M^-1.K)p
           bunbo=zero
           do j=1,ndof
-             bunbo=bunbo+pvec(j,1)*qvec(j)
+             bunbo=bunbo+pvec(j,1)*tvec(j)
+             !write(101,*) pvec(j,1)
           end do
 
+          
           ! update alpha
           alp(2,1)=alp(1,1) ! keep the previous one
           alp(1,1)=bunsi/bunbo ! and update
           xvec(:,irhs,1)=xvec(:,irhs,1)+alp(1,1)*pvec(:,1)
           
           ! update rvec
-          rvec(:)=rvec(:)-alp(1,1)*qvec(:)
+          rvec(:)=rvec(:)-alp(1,1)*tvec(:)
 
           ! update beta
           bunbo=bunsi !beta's bunbo = alpha's bunsi
+
+          trvec(:)=real(rvec(:)) !ika, bunsi
+          tivec(:)=aimag(rvec(:))
+          qrvec=zero
+          qivec=zero
+          phase=33
+          call pardiso (pt, maxfct, mnum, mtype, phase, ndof, fmmat, im, jm, &
+               idum, 1, iparm, msglvl, trvec, qrvec, error)
+          if (error /= 0) then
+             write(*,*) 'the following error was detected (doko): ', error
+             stop
+          endif
+          call pardiso (pt, maxfct, mnum, mtype, phase, ndof, fmmat, im, jm, &
+               idum, 1, iparm, msglvl, tivec, qivec, error)
+          if (error /= 0) then
+             write(*,*) 'the following error was detected (koko): ', error
+             stop
+          endif
+          qvec=cmplx(qrvec,qivec,kind(1.d0))
           bunsi=zero
           do j=1,ndof
-             bunsi=bunsi+rvec(j)*rvec(j)
+             bunsi=bunsi+rvec(j)*qvec(j)
           end do
           bet(2,1)=bet(1,1)
           bet(1,1)=bunsi/bunbo
 
-          pvec(:,1)=rvec(:)+bet(1,1)*pvec(:,1)
-
+          pvec(:,1)=qvec(:)+bet(1,1)*pvec(:,1)
+          
           do ishf=2,nshfts
              sig=shfts(1)-shfts(ishf)
              c(3,ishf)=c(2,ishf)
@@ -455,9 +479,9 @@ contains
              alp(1,ishf)=c(2,ishf)/c(1,ishf)*alp(1,1)
              xvec(:,irhs,ishf)=xvec(:,irhs,ishf)+alp(1,ishf)*pvec(:,ishf)
              bet(1,ishf)=(c(2,ishf)/c(1,ishf))**2*bet(1,1)
-             pvec(:,ishf)=rvec(:)/c(1,ishf)+bet(1,ishf)*pvec(:,ishf)
+             pvec(:,ishf)=qvec(:)/c(1,ishf)+bet(1,ishf)*pvec(:,ishf)
           end do
-          if(real(dot_product(rvec,rvec)).le.real(dot_product(bvec(:,irhs),bvec(:,irhs)))*1.d-8) exit
+          if(real(dot_product(rvec,rvec)).le.real(dot_product(bvec(:,irhs),bvec(:,irhs)))*1.d-32) exit
        end do
 
        do i=1,nshfts
